@@ -7,7 +7,7 @@ Fetches live Net Asset Value (NAV) history from the public AMFI mirror API
 at https://api.mfapi.in for a set of scheme codes, parses the JSON response,
 and persists it as RAW CSV files under ``data/raw/``.
 
-Outputs (all written to ``data/raw/``):
+Outputs (all written to ``data/raw/live_api/``):
     * nav_<code>.csv ........ raw NAV history for one scheme (date, nav).
     * nav_history.csv ....... combined long-format NAV history for all schemes.
     * fund_master.csv ....... one row per scheme describing the fund
@@ -36,7 +36,9 @@ import requests
 # --------------------------------------------------------------------------- #
 
 BASE_DIR = Path(__file__).resolve().parent
-RAW_DIR = BASE_DIR / "data" / "raw"
+# Live API pulls live in their own subfolder so they never collide with the
+# 10 provided datasets (01_fund_master.csv / 02_nav_history.csv ...) in data/raw.
+RAW_DIR = BASE_DIR / "data" / "raw" / "live_api"
 
 API_TEMPLATE = "https://api.mfapi.in/mf/{code}"
 REQUEST_TIMEOUT = 30          # seconds
@@ -264,7 +266,7 @@ def main() -> int:
     mismatches = int((~manifest["matches_brief"] & (manifest["status"] == "OK")).sum())
     if mismatches:
         print(f"  NOTE: {mismatches}/{ok} fetched scheme name(s) DISAGREE with the brief "
-              f"— see data/raw/fetch_manifest.csv (matches_brief column).")
+              f"— see data/raw/live_api/fetch_manifest.csv (matches_brief column).")
     return 0
 
 

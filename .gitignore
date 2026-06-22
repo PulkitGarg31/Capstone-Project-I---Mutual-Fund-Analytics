@@ -21,3 +21,9 @@ env/
 Thumbs.db
 .vscode/
 .idea/
+
+# Source download artifacts — not required in the repo
+# (assignment brief PDF + the raw Google-Drive download / zip)
+*.zip
+drive-download-*/
+Bluestock_MF_Capstone_Project.pdf

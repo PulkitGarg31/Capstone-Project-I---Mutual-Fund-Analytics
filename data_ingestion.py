@@ -72,12 +72,37 @@ def find_col(df: pd.DataFrame, aliases: list[str]) -> str | None:
     return None
 
 
+def parse_dates(series: pd.Series) -> pd.Series:
+    """Robustly parse a date column that may be ISO ``YYYY-MM-DD``, Indian
+    ``DD-MM-YYYY``, or ``YYYY-MM``. Tries explicit formats first (deterministic)
+    and returns the parse with the fewest NaT.
+
+    This deliberately avoids a blanket ``dayfirst=True``: that silently reads an
+    ISO ``2022-01-03`` as ``YYYY-DD-MM`` (-> 2022-03-01) and coerces any day > 12
+    to NaT. The provided datasets are ISO, the live API is DD-MM-YYYY, so we let
+    the data pick the format rather than assuming one."""
+    s = series.astype(str).str.strip()
+    attempts = [{"format": "%Y-%m-%d"}, {"format": "%d-%m-%Y"},
+                {"format": "%Y-%m"}, {"dayfirst": False}, {"dayfirst": True}]
+    best, best_score = None, -1.0
+    for kw in attempts:
+        try:
+            parsed = pd.to_datetime(s, errors="coerce", **kw)
+        except (ValueError, TypeError):
+            continue
+        score = float(parsed.notna().mean())
+        if score > best_score:
+            best, best_score = parsed, score
+        if best_score == 1.0:
+            break
+    return best if best is not None else pd.to_datetime(s, errors="coerce")
+
+
 def looks_like_date(series: pd.Series, sample: int = 50) -> bool:
     s = series.dropna().astype(str).head(sample)
     if s.empty:
         return False
-    parsed = pd.to_datetime(s, errors="coerce", dayfirst=True)
-    return parsed.notna().mean() > 0.8
+    return parse_dates(s).notna().mean() > 0.8
 
 
 def looks_numeric(series: pd.Series, sample: int = 50) -> bool:
@@ -136,7 +161,7 @@ def profile_csv(path: Path) -> dict:
     # date ordering hint
     date_col = find_col(df, DATE_ALIASES)
     if date_col is not None:
-        parsed = pd.to_datetime(df[date_col], errors="coerce", dayfirst=True)
+        parsed = parse_dates(df[date_col])
         if parsed.notna().any():
             if parsed.is_monotonic_decreasing:
                 anomalies.append(f"'{date_col}' is sorted NEWEST-first (descending)")
@@ -187,7 +212,7 @@ def explore_fund_master(fm: pd.DataFrame) -> dict:
     show("fund_house", ["fund_house", "fundhouse", "amc"])
     show("category", ["category", "scheme_category"])
     show("sub_category", ["sub_category", "subcategory"])
-    show("risk_grade", ["risk_grade", "risk", "riskgrade"])
+    show("risk_grade", ["risk_grade", "risk_category", "risk", "riskgrade"])
 
     print("\n  AMFI scheme-code structure")
     print("  " + "-" * 40)
@@ -250,7 +275,7 @@ def validate_codes(fm: pd.DataFrame, nav: pd.DataFrame) -> dict:
         cols = [c for c in (nav_code, nav_date, nav_val) if c]
         res["nav_non_positive_examples"] = bad[cols].head(10).to_dict("records") if len(bad) else []
     if nav_date is not None:
-        d = pd.to_datetime(nav[nav_date], errors="coerce", dayfirst=True)
+        d = parse_dates(nav[nav_date])
         res["nav_date_min"] = str(d.min().date()) if d.notna().any() else None
         res["nav_date_max"] = str(d.max().date()) if d.notna().any() else None
         res["nav_unparseable_dates"] = int(d.isna().sum())
@@ -260,7 +285,7 @@ def validate_codes(fm: pd.DataFrame, nav: pd.DataFrame) -> dict:
     # ---- per-scheme coverage ----------------------------------------------
     if nav_code is not None and nav_date is not None:
         print("\n  Per-scheme NAV coverage:")
-        d = pd.to_datetime(nav[nav_date], errors="coerce", dayfirst=True)
+        d = parse_dates(nav[nav_date])
         tmp = nav.assign(_d=d)
         cov_rows = []
         for code, grp in tmp.groupby(nav_code):
@@ -278,6 +303,43 @@ def validate_codes(fm: pd.DataFrame, nav: pd.DataFrame) -> dict:
 
 
 # --------------------------------------------------------------------------- #
+# 3b. Cross-dataset referential integrity
+# --------------------------------------------------------------------------- #
+
+def cross_reference(profiles: list[dict], fund_master: pd.DataFrame) -> list[dict]:
+    """Every amfi_code appearing in any dataset should also exist in fund_master.
+    Reports, per file, how many distinct codes are NOT covered by fund_master."""
+    print("\n" + "=" * 78)
+    print("CROSS-DATASET CODE INTEGRITY  (every amfi_code should exist in fund_master)")
+    print("=" * 78)
+    fm_col = find_col(fund_master, CODE_ALIASES)
+    if fm_col is None:
+        print("  fund_master has no code column — skipped.")
+        return []
+    fm_codes = set(pd.to_numeric(fund_master[fm_col], errors="coerce").dropna().astype(int))
+
+    rows: list[dict] = []
+    for p in profiles:
+        if not p.get("loaded"):
+            continue
+        df = p["_df"]
+        col = find_col(df, CODE_ALIASES)
+        if col is None:
+            continue
+        codes = set(pd.to_numeric(df[col], errors="coerce").dropna().astype(int))
+        missing = sorted(codes - fm_codes)
+        rows.append({
+            "file": p["file"], "code_col": col,
+            "distinct_codes": len(codes),
+            "missing_from_fund_master": len(missing),
+            "examples": missing[:8],
+        })
+        flag = "OK" if not missing else f"{len(missing)} NOT in fund_master e.g. {missing[:5]}"
+        print(f"  {p['file']:<28} codes={len(codes):>4}  -> {flag}")
+    return rows
+
+
+# --------------------------------------------------------------------------- #
 # 4. Cleaned processed output + written summary
 # --------------------------------------------------------------------------- #
 
@@ -288,7 +350,7 @@ def write_processed(nav: pd.DataFrame, val: dict) -> Path | None:
     if not (code_col and date_col and val_col):
         return None
     clean = nav.copy()
-    clean[date_col] = pd.to_datetime(clean[date_col], errors="coerce", dayfirst=True)
+    clean[date_col] = parse_dates(clean[date_col])
     clean[val_col] = pd.to_numeric(clean[val_col], errors="coerce")
     before = len(clean)
     clean = clean.dropna(subset=[date_col, val_col])      # drop unparseable
@@ -305,7 +367,8 @@ def write_processed(nav: pd.DataFrame, val: dict) -> Path | None:
     return out
 
 
-def write_summary(profiles: list[dict], fm_explore: dict, val: dict) -> Path:
+def write_summary(profiles: list[dict], fm_explore: dict, val: dict,
+                  xref: list[dict]) -> Path:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     out = REPORTS_DIR / "data_quality_summary.md"
     ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
@@ -314,18 +377,18 @@ def write_summary(profiles: list[dict], fm_explore: dict, val: dict) -> Path:
     lines.append("# Day 1 — Data Quality Summary\n")
     lines.append(f"_Generated (UTC): {ts}_\n")
 
-    lines.append("## 1. Source note / known anomaly\n")
+    lines.append("## 1. Source data\n")
     lines.append(
-        "- The 10 provided CSV datasets were **not present** in `data/raw/` at run time. "
-        "The pipeline was bootstrapped from **live AMFI NAV data** (mfapi.in) for the 6 "
-        "assignment scheme codes so that load → explore → validate runs end-to-end. "
-        "`data_ingestion.py` auto-loads any additional CSVs later dropped into `data/raw/`.\n")
+        "- **Primary:** the 10 provided CSV datasets in `data/raw/` — fund master, NAV history, "
+        "AUM by fund house, monthly SIP inflows, category inflows, industry folio counts, scheme "
+        "performance, investor transactions, portfolio holdings and benchmark indices.\n")
     lines.append(
-        "- **The brief's scheme-code labels are largely wrong.** Each code was checked against "
-        "the live AMFI feed; the API scheme name is treated as the source of truth. See the "
-        "mapping below and `data/raw/fetch_manifest.csv`.\n")
+        "- **Supplementary:** live AMFI NAV pulls in `data/raw/live_api/` (via `live_nav_fetch.py`, "
+        "6 scheme codes). Known anomaly: 5 of those 6 codes resolve to a *different* fund on the "
+        "live feed than the assignment brief states — see the table below and "
+        "`data/raw/live_api/fetch_manifest.csv`.\n")
 
-    man_path = RAW_DIR / "fetch_manifest.csv"
+    man_path = RAW_DIR / "live_api" / "fetch_manifest.csv"
     if man_path.exists():
         man = pd.read_csv(man_path)
         lines.append("### Brief label vs live AMFI scheme name\n")
@@ -397,6 +460,16 @@ def write_summary(profiles: list[dict], fm_explore: dict, val: dict) -> Path:
             for r in cov:
                 lines.append(f"| {r['scheme_code']} | {r['rows']} | {r['from']} | {r['to']} |")
 
+    if xref:
+        lines.append("\n## 5. Cross-dataset code integrity\n")
+        lines.append("Every `amfi_code` in another dataset should exist in `fund_master`:\n")
+        lines.append("| File | code col | distinct codes | not in fund_master | examples |")
+        lines.append("|------|----------|---------------:|-------------------:|----------|")
+        for r in xref:
+            ex = r["examples"] if r["examples"] else ""
+            lines.append(f"| {r['file']} | {r['code_col']} | {r['distinct_codes']} | "
+                         f"{r['missing_from_fund_master']} | {ex} |")
+
     out.write_text("\n".join(lines) + "\n", encoding="utf-8")
     print(f"\n  wrote {out.relative_to(BASE_DIR)}")
     return out
@@ -454,7 +527,9 @@ def main() -> int:
     else:
         print("\n(fund_master and/or nav_history not found — validation skipped)")
 
-    write_summary(profiles, fm_explore, val)
+    xref = cross_reference(profiles, fund_master) if fund_master is not None else []
+
+    write_summary(profiles, fm_explore, val, xref)
 
     print("\n" + "=" * 78)
     print("DONE.")

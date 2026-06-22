@@ -1,8 +1,10 @@
 # Mutual Fund Analytics — Capstone Project I
 
-An analytics project on Indian mutual-fund NAV data, sourced from the public
-AMFI mirror API at [mfapi.in](https://www.mfapi.in/). This repository tracks the
-project day by day; **Day 1** covers environment setup and data ingestion.
+Analytics on Indian mutual-fund data. The project is built around **10 provided
+datasets** (fund master, NAV history, AUM, flows, performance, holdings,
+transactions, benchmarks) and supplemented with **live NAV pulls** from the
+public AMFI mirror at [mfapi.in](https://www.mfapi.in/). This repository tracks
+the work day by day; **Day 1** covers environment setup and data ingestion.
 
 ---
 
@@ -11,14 +13,15 @@ project day by day; **Day 1** covers environment setup and data ingestion.
 ```
 .
 ├── data/
-│   ├── raw/            # immutable source data (live API pulls, provided CSVs)
-│   └── processed/      # cleaned, analysis-ready data
-├── notebooks/          # exploratory Jupyter notebooks
-├── sql/                # SQL schema / queries (later days)
-├── dashboard/          # dashboard app (later days)
-├── reports/            # generated reports (e.g. data_quality_summary.md)
-├── data_ingestion.py   # load + profile + explore + validate raw CSVs
-├── live_nav_fetch.py   # fetch live NAV history from mfapi.in -> data/raw
+│   ├── raw/                # 10 provided datasets (01_*.csv ... 10_*.csv)
+│   │   └── live_api/       # supplementary live NAV pulls from mfapi.in
+│   └── processed/          # cleaned, analysis-ready data
+├── notebooks/              # exploratory Jupyter notebooks
+├── sql/                    # SQL schema / queries (later days)
+├── dashboard/              # dashboard app (later days)
+├── reports/                # generated reports (e.g. data_quality_summary.md)
+├── data_ingestion.py       # load + profile + explore + validate the datasets
+├── live_nav_fetch.py       # fetch live NAV history -> data/raw/live_api/
 ├── requirements.txt
 └── README.md
 ```
@@ -37,59 +40,69 @@ scipy, jupyter.
 ## Usage (Day 1 pipeline)
 
 ```bash
-# 1) Fetch live NAV history for the 6 assignment scheme codes -> data/raw/
+# 1) (optional) refresh the supplementary live NAV pulls -> data/raw/live_api/
 python live_nav_fetch.py
 
-# 2) Load + profile every CSV in data/raw, explore fund_master,
-#    validate AMFI codes, and write reports/data_quality_summary.md
+# 2) Load + profile all 10 provided CSVs, explore fund_master, validate AMFI
+#    codes (incl. cross-dataset integrity), write the data-quality report and
+#    a cleaned data/processed/nav_history_clean.csv
 python data_ingestion.py
 ```
 
-`data_ingestion.py` is schema-tolerant: drop any additional CSVs (e.g. the 10
-provided datasets) into `data/raw/` and re-run — they are profiled
-automatically, and `fund_master` / `nav_history` are located by filename or by
-their columns.
+`data_ingestion.py` is schema-tolerant: it profiles **every** CSV in `data/raw/`
+and locates `fund_master` / `nav_history` by filename or columns, so additional
+datasets can be dropped in and re-run.
 
-## Data dictionary
+## The 10 provided datasets (`data/raw/`)
 
-**`data/raw/fund_master.csv`** — one row per scheme.
+| # | File | Grain | Rows | Key |
+|---|------|-------|-----:|-----|
+| 01 | `fund_master.csv` | one row per scheme | 40 | `amfi_code` |
+| 02 | `nav_history.csv` | daily NAV per scheme | 46,000 | `amfi_code` + `date` |
+| 03 | `aum_by_fund_house.csv` | quarterly AUM per fund house | 90 | `fund_house` + `date` |
+| 04 | `monthly_sip_inflows.csv` | monthly industry SIP | 48 | `month` |
+| 05 | `category_inflows.csv` | monthly net inflow per category | 144 | `month` + `category` |
+| 06 | `industry_folio_count.csv` | quarterly folio counts | 21 | `month` |
+| 07 | `scheme_performance.csv` | returns / risk metrics per scheme | 40 | `amfi_code` |
+| 08 | `investor_transactions.csv` | individual investor transactions | 32,778 | `investor_id` |
+| 09 | `portfolio_holdings.csv` | top holdings per scheme | 322 | `amfi_code` + `stock_symbol` |
+| 10 | `benchmark_indices.csv` | daily index close | 8,050 | `index_name` + `date` |
 
-| column | meaning |
-|--------|---------|
-| `scheme_code` | AMFI scheme code (primary key) |
-| `scheme_name` | full scheme name from AMFI |
-| `fund_house` | AMC / fund house |
-| `scheme_type`, `scheme_category` | AMFI classification (raw) |
-| `category`, `sub_category` | `scheme_category` split on `-` |
-| `risk_grade` | **derived** riskometer grade (heuristic from sub-category) |
-| `plan_type`, `option` | Direct/Regular and Growth/IDCW (parsed from name) |
-| `isin_growth`, `isin_div_reinvestment` | ISINs |
+## Data dictionary (key tables)
 
-**`data/raw/nav_history.csv`** — long format, many rows per scheme:
-`scheme_code, scheme_name, date (DD-MM-YYYY, raw), nav (raw)`.
+**`01_fund_master.csv`** — `amfi_code` (PK), `fund_house`, `scheme_name`,
+`category`, `sub_category`, `plan`, `launch_date`, `benchmark`,
+`expense_ratio_pct`, `exit_load_pct`, `min_sip_amount`, `min_lumpsum_amount`,
+`fund_manager`, `risk_category`, `sebi_category_code`.
 
-**`data/processed/nav_history_clean.csv`** — parsed `date` (datetime), numeric
-`nav`, de-duplicated, non-positive NAVs removed, sorted ascending per scheme.
+**`02_nav_history.csv`** — `amfi_code`, `date` (ISO `YYYY-MM-DD`), `nav`.
+
+**`data/processed/nav_history_clean.csv`** — `02_nav_history` with parsed dates,
+numeric NAV, non-positive/duplicate rows removed, sorted ascending per scheme.
 
 ## Day 1 — key findings
 
 See [`reports/data_quality_summary.md`](reports/data_quality_summary.md) for the
 full report. Headlines:
 
-- **The brief's scheme-code labels are mostly wrong.** 5 of the 6 codes resolve
-  to a different fund on the live AMFI feed (e.g. `125497` is *SBI Small Cap*,
-  not *HDFC Top 100*; only `118632` = Nippon Large Cap matches). All downstream
-  work keys on the live AMFI scheme code / name, not the brief label.
-- The 10 "provided" CSV datasets were not supplied, so the pipeline was
-  bootstrapped from live AMFI data for the 6 codes (≈19.9k NAV rows, 2012–2026).
-- AMFI-code validation **passes**: every `fund_master` code has NAV history;
-  no orphan codes.
-- Raw quirks handled: NAV dates are strings sorted newest-first; one bad
-  `0.0` NAV (scheme `120503`, 2013-04-07) is dropped during cleaning.
+- **AMFI-code validation passes:** all 40 `fund_master` codes have NAV history,
+  no orphans; every `amfi_code` in performance / transactions / holdings also
+  exists in `fund_master`.
+- The provided NAV history is clean: 46,000 rows, 0 nulls, 0 non-positive NAVs,
+  0 duplicate `(amfi_code, date)` pairs, spanning 2022-01-03 → 2026-05-29.
+- **Date-parsing pitfall (handled):** the provided data is ISO `YYYY-MM-DD`,
+  while the live API is `DD-MM-YYYY`. A naive `dayfirst=True` silently rewrites
+  ISO dates (e.g. `2022-01-03` → `2022-03-01`) and drops any day > 12; the loader
+  uses a format-robust parser instead.
+- **Supplementary live-API note:** 5 of the 6 scheme codes named in the brief
+  resolve to a *different* fund on the live AMFI feed (only `118632` = Nippon
+  Large Cap matches). The live pulls live under `data/raw/live_api/` and are
+  kept separate from the canonical provided data.
 
 ## Deliverables (Day 1)
 
 - `data_ingestion.py`, `live_nav_fetch.py`, `requirements.txt`
-- Raw data in `data/raw/`, cleaned data in `data/processed/`
+- 10 provided datasets in `data/raw/`, live pulls in `data/raw/live_api/`,
+  cleaned data in `data/processed/`
 - `reports/data_quality_summary.md`
-- Git repo with commit **"Day 1: Data ingestion complete"**
+- Git repo with the Day 1 commits

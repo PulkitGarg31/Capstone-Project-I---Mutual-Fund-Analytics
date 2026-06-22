@@ -1,12 +1,12 @@
 # Day 1 — Data Quality Summary
 
-_Generated (UTC): 2026-06-22T07:53:10+00:00_
+_Generated (UTC): 2026-06-22T11:04:59+00:00_
 
-## 1. Source note / known anomaly
+## 1. Source data
 
-- The 10 provided CSV datasets were **not present** in `data/raw/` at run time. The pipeline was bootstrapped from **live AMFI NAV data** (mfapi.in) for the 6 assignment scheme codes so that load → explore → validate runs end-to-end. `data_ingestion.py` auto-loads any additional CSVs later dropped into `data/raw/`.
+- **Primary:** the 10 provided CSV datasets in `data/raw/` — fund master, NAV history, AUM by fund house, monthly SIP inflows, category inflows, industry folio counts, scheme performance, investor transactions, portfolio holdings and benchmark indices.
 
-- **The brief's scheme-code labels are largely wrong.** Each code was checked against the live AMFI feed; the API scheme name is treated as the source of truth. See the mapping below and `data/raw/fetch_manifest.csv`.
+- **Supplementary:** live AMFI NAV pulls in `data/raw/live_api/` (via `live_nav_fetch.py`, 6 scheme codes). Known anomaly: 5 of those 6 codes resolve to a *different* fund on the live feed than the assignment brief states — see the table below and `data/raw/live_api/fetch_manifest.csv`.
 
 ### Brief label vs live AMFI scheme name
 
@@ -26,22 +26,23 @@ _Generated (UTC): 2026-06-22T07:53:10+00:00_
 
 | File | Rows | Cols | Anomalies |
 |------|-----:|-----:|-----------|
-| fetch_manifest.csv | 6 | 11 | null values present: {'error': 6}; constant/empty column(s): ['status', 'latest_date', 'error', 'fetched_at_utc'] |
-| fund_master.csv | 6 | 12 | null values present: {'isin_div_reinvestment': 5}; constant/empty column(s): ['scheme_type', 'plan_type'] |
-| nav_118632.csv | 3312 | 2 | 'date' is sorted NEWEST-first (descending) |
-| nav_119092.csv | 3579 | 2 | 'date' is sorted NEWEST-first (descending) |
-| nav_119551.csv | 3250 | 2 | 'date' is sorted NEWEST-first (descending) |
-| nav_120503.csv | 3321 | 2 | 'date' is sorted NEWEST-first (descending) |
-| nav_120841.csv | 3315 | 2 | 'date' is sorted NEWEST-first (descending) |
-| nav_125497.csv | 3105 | 2 | 'date' is sorted NEWEST-first (descending) |
-| nav_history.csv | 19882 | 4 | 'date' is not chronologically sorted |
+| 01_fund_master.csv | 40 | 15 | constant/empty column(s): ['min_sip_amount'] |
+| 02_nav_history.csv | 46000 | 3 | 'date' is not chronologically sorted |
+| 03_aum_by_fund_house.csv | 90 | 5 | none |
+| 04_monthly_sip_inflows.csv | 48 | 6 | null values present: {'yoy_growth_pct': 12} |
+| 05_category_inflows.csv | 144 | 3 | none |
+| 06_industry_folio_count.csv | 21 | 6 | none |
+| 07_scheme_performance.csv | 40 | 19 | none |
+| 08_investor_transactions.csv | 32778 | 13 | none |
+| 09_portfolio_holdings.csv | 322 | 8 | constant/empty column(s): ['portfolio_date'] |
+| 10_benchmark_indices.csv | 8050 | 3 | 'date' is not chronologically sorted |
 
 ## 3. Fund master
 
-- **fund_house** (6): Aditya Birla Sun Life Mutual Fund, Axis Mutual Fund, HDFC Mutual Fund, Nippon India Mutual Fund, SBI Mutual Fund, quant Mutual Fund
-- **category** (2): Debt Scheme, Equity Scheme
-- **sub_category** (6): Banking and PSU Fund, ELSS, Large Cap Fund, Mid Cap Fund, Money Market Fund, Small Cap Fund
-- **risk_grade** (3): High, Low to Moderate, Very High
+- **fund_house** (10): Aditya Birla Sun Life MF, Axis Mutual Fund, DSP Mutual Fund, HDFC Mutual Fund, ICICI Prudential MF, Kotak Mahindra MF, Mirae Asset MF, Nippon India MF, SBI Mutual Fund, UTI Mutual Fund
+- **category** (2): Debt, Equity
+- **sub_category** (12): ELSS, Flexi Cap, Gilt, Index, Index/ETF, Large & Mid Cap, Large Cap, Liquid, Mid Cap, Short Duration, Small Cap, Value
+- **risk_grade** (5): High, Low, Moderate, Moderately High, Very High
 
 ### AMFI scheme-code structure
 
@@ -60,30 +61,75 @@ _Generated (UTC): 2026-06-22T07:53:10+00:00_
 
 ## 4. AMFI code validation
 
-- fund_master codes: **6**
-- nav_history codes: **6**
+- fund_master codes: **40**
+- nav_history codes: **40**
 - Codes in fund_master **missing** from nav_history: **none**
 - Codes in nav_history not in fund_master: none
 - **Result: ✅ PASS — every fund_master code has NAV history.**
 
 ### NAV quality
 
-- NAV rows (raw): 19882
+- NAV rows (raw): 46000
 - Null NAVs: 0
-- Non-positive NAVs (<= 0): 1
-  - offending row: {'scheme_code': 120503, 'date': '07-04-2013', 'nav': 0.0}
+- Non-positive NAVs (<= 0): 0
 - Unparseable dates: 0
 - Duplicate (scheme_code, date) pairs: 0
-- Date range: 2012-12-31 → 2026-06-19
-- Rows dropped while building `data/processed/nav_history_clean.csv`: 1 (null/unparseable + non-positive + duplicate).
+- Date range: 2022-01-03 → 2026-05-29
+- Rows dropped while building `data/processed/nav_history_clean.csv`: 0 (null/unparseable + non-positive + duplicate).
 
 ### Per-scheme NAV coverage
 
 | scheme_code | rows | from | to |
 |------------:|-----:|------|----|
-| 118632 | 3312 | 2013-01-02 | 2026-06-19 |
-| 119092 | 3579 | 2012-12-31 | 2026-06-19 |
-| 119551 | 3250 | 2013-01-02 | 2026-06-19 |
-| 120503 | 3321 | 2013-01-02 | 2026-06-19 |
-| 120841 | 3315 | 2013-01-07 | 2026-06-19 |
-| 125497 | 3105 | 2013-11-18 | 2026-06-19 |
+| 100016 | 1150 | 2022-01-03 | 2026-05-29 |
+| 100025 | 1150 | 2022-01-03 | 2026-05-29 |
+| 100033 | 1150 | 2022-01-03 | 2026-05-29 |
+| 101206 | 1150 | 2022-01-03 | 2026-05-29 |
+| 101207 | 1150 | 2022-01-03 | 2026-05-29 |
+| 101208 | 1150 | 2022-01-03 | 2026-05-29 |
+| 102885 | 1150 | 2022-01-03 | 2026-05-29 |
+| 102886 | 1150 | 2022-01-03 | 2026-05-29 |
+| 102887 | 1150 | 2022-01-03 | 2026-05-29 |
+| 118632 | 1150 | 2022-01-03 | 2026-05-29 |
+| 118633 | 1150 | 2022-01-03 | 2026-05-29 |
+| 118634 | 1150 | 2022-01-03 | 2026-05-29 |
+| 118635 | 1150 | 2022-01-03 | 2026-05-29 |
+| 118636 | 1150 | 2022-01-03 | 2026-05-29 |
+| 119092 | 1150 | 2022-01-03 | 2026-05-29 |
+| 119093 | 1150 | 2022-01-03 | 2026-05-29 |
+| 119094 | 1150 | 2022-01-03 | 2026-05-29 |
+| 119095 | 1150 | 2022-01-03 | 2026-05-29 |
+| 119120 | 1150 | 2022-01-03 | 2026-05-29 |
+| 119551 | 1150 | 2022-01-03 | 2026-05-29 |
+| 119552 | 1150 | 2022-01-03 | 2026-05-29 |
+| 119598 | 1150 | 2022-01-03 | 2026-05-29 |
+| 119599 | 1150 | 2022-01-03 | 2026-05-29 |
+| 120503 | 1150 | 2022-01-03 | 2026-05-29 |
+| 120504 | 1150 | 2022-01-03 | 2026-05-29 |
+| 120505 | 1150 | 2022-01-03 | 2026-05-29 |
+| 120506 | 1150 | 2022-01-03 | 2026-05-29 |
+| 120507 | 1150 | 2022-01-03 | 2026-05-29 |
+| 120841 | 1150 | 2022-01-03 | 2026-05-29 |
+| 120842 | 1150 | 2022-01-03 | 2026-05-29 |
+| 120843 | 1150 | 2022-01-03 | 2026-05-29 |
+| 120844 | 1150 | 2022-01-03 | 2026-05-29 |
+| 125497 | 1150 | 2022-01-03 | 2026-05-29 |
+| 125498 | 1150 | 2022-01-03 | 2026-05-29 |
+| 148567 | 1150 | 2022-01-03 | 2026-05-29 |
+| 148568 | 1150 | 2022-01-03 | 2026-05-29 |
+| 148569 | 1150 | 2022-01-03 | 2026-05-29 |
+| 149322 | 1150 | 2022-01-03 | 2026-05-29 |
+| 149323 | 1150 | 2022-01-03 | 2026-05-29 |
+| 149324 | 1150 | 2022-01-03 | 2026-05-29 |
+
+## 5. Cross-dataset code integrity
+
+Every `amfi_code` in another dataset should exist in `fund_master`:
+
+| File | code col | distinct codes | not in fund_master | examples |
+|------|----------|---------------:|-------------------:|----------|
+| 01_fund_master.csv | amfi_code | 40 | 0 |  |
+| 02_nav_history.csv | amfi_code | 40 | 0 |  |
+| 07_scheme_performance.csv | amfi_code | 40 | 0 |  |
+| 08_investor_transactions.csv | amfi_code | 40 | 0 |  |
+| 09_portfolio_holdings.csv | amfi_code | 34 | 0 |  |
