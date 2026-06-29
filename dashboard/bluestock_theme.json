@@ -1,0 +1,41 @@
+{
+  "name": "Bluestock Mutual Fund Analytics",
+  "dataColors": [
+    "#174A7C",
+    "#2CA6A4",
+    "#4CAF7A",
+    "#F4B942",
+    "#D95F5F",
+    "#7C3AED",
+    "#4B5563",
+    "#60A5FA"
+  ],
+  "background": "#F7F9FC",
+  "foreground": "#1F2937",
+  "tableAccent": "#2CA6A4",
+  "visualStyles": {
+    "*": {
+      "*": {
+        "title": [
+          {
+            "fontColor": {
+              "solid": {
+                "color": "#1F2937"
+              }
+            },
+            "fontSize": 12
+          }
+        ],
+        "labels": [
+          {
+            "color": {
+              "solid": {
+                "color": "#6B7280"
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

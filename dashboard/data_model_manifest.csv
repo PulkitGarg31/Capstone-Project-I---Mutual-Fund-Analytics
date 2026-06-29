@@ -1,0 +1,11 @@
+table,source,rows,columns,status
+fund_master,data/processed/fund_master_clean.csv,40,15,loaded
+nav_history,data/processed/nav_history_clean.csv,64320,3,loaded
+aum_by_fund_house,data/processed/aum_by_fund_house_clean.csv,90,5,loaded
+monthly_sip_inflows,data/processed/monthly_sip_inflows_clean.csv,48,6,loaded
+category_inflows,data/processed/category_inflows_clean.csv,144,3,loaded
+industry_folio_count,data/processed/industry_folio_count_clean.csv,21,6,loaded
+investor_transactions,data/processed/investor_transactions_clean.csv,32778,15,loaded
+benchmark_indices,data/processed/benchmark_indices_clean.csv,8050,3,loaded
+fund_scorecard,data/processed/fund_scorecard.csv,40,37,loaded
+alpha_beta,data/processed/alpha_beta.csv,40,7,loaded
